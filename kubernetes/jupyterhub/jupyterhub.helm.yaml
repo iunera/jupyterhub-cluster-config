@@ -1,0 +1,313 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: jupyterhub
+  namespace: jupyterhub
+spec:
+  releaseName: jupyterhub
+  targetNamespace: jupyterhub
+  chart:
+    spec:
+      chart: jupyterhub
+      version: 3.3.7
+      sourceRef:
+        kind: HelmRepository
+        name: jupyterhub
+        namespace: jupyterhub
+  interval: 10m
+  timeout: 2m
+  install:
+    createNamespace: false
+    disableWait: true
+
+  values:
+    # For reference see the configuration reference and default values, but make
+    # sure to refer to the Helm chart version of interest to you!
+    #
+    # Chart config reference:   https://zero-to-jupyterhub.readthedocs.io/en/stable/resources/reference.html
+    # Chart default values:     https://github.com/jupyterhub/zero-to-jupyterhub-k8s/blob/HEAD/jupyterhub/values.yaml
+    # Available chart versions: https://hub.jupyter.org/helm-chart/
+    #
+
+    hub:
+      config:
+        Authenticator:
+          enable_auth_state: true
+          admin_users:
+            - <YOUR AD USER NAME>
+          allowed_users:
+            - <YOUR AD USER NAME>
+
+        JupyterHub:
+          admin_access: true
+          authenticator_class: azuread
+
+      extraConfig: 
+        # instead of the AzureAdOAuthenticator configuration in hub.config we need to specify a dynamic config get the the secrets from the environment variables
+        # the azuread_oauth_config.py would look like the following in yaml format
+        # https://zero-to-jupyterhub.readthedocs.io/en/latest/administrator/authentication.html#azure-active-directory
+        # AzureAdOAuthenticator:
+        #   client_id: <Azure AD Client ID>
+        #   client_secret: <Azure AD Secret>
+        #   tenant_id: <Azure AD Tenant Id>
+        #   oauth_callback_url: https://<your public dns name>/hub/oauth_callback
+
+        azuread_oauth_config.py: |
+          c.OAuthenticator.oauth_callback_url =  os.getenv("OAUTH_CALLBACK_URL", default=None)
+          c.OAuthenticator.client_id = os.getenv("CLIENT_ID", default=None)
+          c.OAuthenticator.client_secret = os.getenv("CLIENT_SECRET", default=None)
+
+          c.AzureAdOAuthenticator.tenant_id = os.getenv("TENANT_ID", default=None)
+          c.AzureAdOAuthenticator.scope = ["openid", "email"]
+
+      extraEnv: 
+        OAUTH_CALLBACK_URL:
+          valueFrom:
+            secretKeyRef:
+              name: custom-hub-secrets
+              key: oauth_callback_url
+        CLIENT_ID:
+          valueFrom:
+            secretKeyRef:
+              name: custom-hub-secrets
+              key: client_id
+        CLIENT_SECRET:
+          valueFrom:
+            secretKeyRef:
+              name: custom-hub-secrets
+              key: client_secret
+        TENANT_ID:
+          valueFrom:
+            secretKeyRef:
+              name: custom-hub-secrets
+              key: tenant_id
+
+      nodeSelector: {}
+      tolerations: []
+      concurrentSpawnLimit: 64
+      consecutiveFailureLimit: 5
+      activeServerLimit:
+      deploymentStrategy:
+        ## type: Recreate
+        ## - sqlite-pvc backed hubs require the Recreate deployment strategy as a
+        ##   typical PVC storage can only be bound to one pod at the time.
+        ## - JupyterHub isn't designed to support being run in parallell. More work
+        ##   needs to be done in JupyterHub itself for a fully highly available (HA)
+        ##   deployment of JupyterHub on k8s is to be possible.
+        type: Recreate
+      db:
+        type: sqlite-pvc
+        upgrade:
+        pvc:
+          annotations: {}
+          selector: {}
+          accessModes:
+            - ReadWriteOnce
+          storage: 1Gi
+          subPath:
+          storageClassName: k8snfs
+        url:
+        password:
+      labels: {}
+      annotations: {}
+      command: []
+      args: []
+      extraContainers: []
+      extraVolumes: []
+      extraVolumeMounts: []
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+      services: {}
+      networkPolicy:
+        enabled: true
+        ingress: []
+        egress:
+          - to:
+              - ipBlock:
+                  cidr: 0.0.0.0/0
+        interNamespaceAccessLabels: ignore
+        allowedIngressPorts: []
+      allowNamedServers: false
+      namedServerLimitPerUser:
+      authenticatePrometheus:
+      redirectToServer:
+      shutdownOnLogout:
+      templatePaths: []
+      templateVars: {}
+      existingSecret: custom-hub-secrets
+      serviceAccount:
+        create: true
+        name:
+        annotations: {}
+      extraPodSpec: {}
+
+    rbac:
+      create: true
+
+    # singleuser relates to the configuration of KubeSpawner which runs in the hub
+    # pod, and its spawning of user pods such as jupyter-myusername.
+    # we have used the node labels describe in `README.md`
+    singleuser:
+      podNameTemplate:
+      extraTolerations: []
+      nodeSelector: {}
+      extraNodeAffinity: {}
+      extraPodAffinity:
+        required: []
+        preferred: []
+      extraPodAntiAffinity:
+        required: []
+        preferred: []
+      extraEnv:
+        JUPYTERLAB_S3_ENDPOINT:
+          valueFrom:
+            secretKeyRef:
+              name: singleuser-secrets
+              key: s3_endpoint
+        JUPYTERLAB_S3_ACCESS_KEY_ID:
+          valueFrom:
+            secretKeyRef:
+              name: singleuser-secrets
+              key: s3_access_key_id
+        JUPYTERLAB_S3_SECRET_ACCESS_KEY:
+          valueFrom:
+            secretKeyRef:
+              name: singleuser-secrets
+              key: s3_access_key_secret
+
+        AWS_REGION: eu-central-1
+        AWS_DEFAULT_REGION: eu-central-1
+
+        AWS_ACCESS_KEY_ID:
+          valueFrom:
+            secretKeyRef:
+              name: singleuser-secrets
+              key: s3_access_key_id
+        AWS_SECRET_ACCESS_KEY:
+          valueFrom:
+            secretKeyRef:
+              name: singleuser-secrets
+              key: s3_access_key_secret
+
+        DRUID_PUBLIC_FQDN:
+          valueFrom:
+            secretKeyRef:
+              name: singleuser-secrets
+              key: druid_public_fqdn
+        DRUID_QUERY_USER:
+          valueFrom:
+            secretKeyRef:
+              name: singleuser-secrets
+              key: druid_query_user
+        DRUID_QUERY_PASSWORD:
+          valueFrom:
+            secretKeyRef:
+              name: singleuser-secrets
+              key: druid_query_password
+
+      initContainers: []
+      extraContainers: []
+      uid: 1000
+      fsGid: 100
+      serviceAccountName:
+      storage:
+        type: dynamic # or none
+        extraLabels: {}
+        extraVolumes: []
+        extraVolumeMounts: []
+        static:
+          pvcName:
+          subPath: '{username}'
+        capacity: 50Gi
+        homeMountPath: /home/jovyan
+        dynamic:
+          storageClass: k8snfs
+          pvcNameTemplate: claim-{username}{servername}
+          volumeNameTemplate: volume-{username}{servername}
+          storageAccessModes: [ReadWriteMany]
+      startTimeout: 300
+      cpu:
+        limit: 4
+        guarantee: 2
+      memory:
+        limit: 32G
+        guarantee: 16G
+      extraResource:
+        limits: {}
+        guarantees: {}
+      cmd: jupyterhub-singleuser
+      defaultUrl: "/lab" # Use jupyterlab instead of jupyternotebooks
+      extraPodConfig: {}
+      lifecycleHooks: {}
+      networkPolicy:
+        enabled: true
+        ingress: []
+        egress: 
+          - to:
+              - namespaceSelector: {}
+                podSelector:
+                  matchLabels:
+                    app: minio
+            ports:
+              - port: 9000
+                protocol: TCP
+          - to:
+              - namespaceSelector: {}
+                podSelector:
+                  matchLabels:
+                    app: druid
+            ports:
+              - port: 9088
+                protocol: TCP
+        egressAllowRules:
+          cloudMetadataServer: false
+          dnsPortsCloudMetadataServer: true
+          dnsPortsKubeSystemNamespace: true
+          dnsPortsPrivateIPs: true
+          nonPrivateIPs: true
+          privateIPs: false
+        interNamespaceAccessLabels: ignore
+        allowedIngressPorts: []
+
+      # https://jupyterhub-kubespawner.readthedocs.io/en/latest/objects.html
+      # https://jupyterhub.readthedocs.io/en/stable/reference/config-user-env.html
+      profileList:
+        - display_name: "iunera Datascience lab-4.0.7"
+          description: "Python R, Julia, git, S3; Based on jupyter/datascience-notebook:x86_64-lab-4.0.7"
+          default: true
+          kubespawner_override:
+            image: iunera/datascience-notebook:lab-4.0.7
+
+        - display_name: "iunera Datascience lab (DEV Image)"
+          description: "Based on jupyter/datascience-notebook. Branch build https://github.com/iunera/jupyterhub-cluster-config/blob/init/docker/datascience-notebook/Dockerfile"
+          kubespawner_override:
+            image: iunera/datascience-notebook:latest-dev
+            image_pull_policy: Always
+
+    prePuller:
+      hook:
+        enabled: false
+        pullOnlyOnChanges: false
+      continuous:
+        enabled: false
+
+    ingress:
+      enabled: true
+      annotations: 
+        kubernetes.io/ingress.class: "nginx"
+        kubernetes.io/tls-acme: "true"
+        nginx.ingress.kubernetes.io/proxy-body-size: 64m
+        cert-manager.io/cluster-issuer: letsencrypt-prod
+      hosts: 
+        - jupyter.analyticsinternal.iunera.com
+      pathSuffix: ''
+      tls:
+        - secretName: jupyter.analyticsinternal.iunera.com-tls
+          hosts:
+            - jupyter.analyticsinternal.iunera.com
+
+    debug:
+      enabled: false
