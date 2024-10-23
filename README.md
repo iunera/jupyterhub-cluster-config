@@ -70,3 +70,6 @@ If you want to change the notebook images here e.g. the `datascience-notebook` c
 If you are done send a Pull Request.
 
 The new Stable Image needs to be applied.
+
+# License
+[Open Compensation Token License, Version 0.20](https://github.com/open-compensation-token-license/license/blob/main/LICENSE.md)
