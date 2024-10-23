@@ -1,5 +1,5 @@
 # https://hub.docker.com/r/jupyter/datascience-notebook/tags
-FROM jupyter/datascience-notebook:x86_64-lab-4.0.7
+FROM jupyter/datascience-notebook:x86_64-notebook-7.0.6
 
 USER root
 RUN \
